@@ -13,9 +13,21 @@
 import { defineCommand, runMain } from "citty";
 import { z } from "zod";
 
-const ingestSchema = z.object({
-  source: z.string().min(1, "path is required"),
-});
+import { DEFAULT_CHUNK_OVERLAP, DEFAULT_CHUNK_SIZE } from "./src/chunk.ts";
+import { DEFAULT_DB_PATH } from "./src/db.ts";
+import { ingestPath } from "./src/ingest.ts";
+
+const ingestSchema = z
+  .object({
+    source: z.string().min(1, "path is required"),
+    db: z.string().min(1).default(DEFAULT_DB_PATH),
+    size: z.coerce.number().int().min(1).max(8000).default(DEFAULT_CHUNK_SIZE),
+    overlap: z.coerce.number().int().min(0).max(8000).default(DEFAULT_CHUNK_OVERLAP),
+  })
+  .refine((value) => value.overlap < value.size, {
+    error: "overlap must be smaller than size",
+    path: ["overlap"],
+  });
 
 const querySchema = z.object({
   question: z.string().min(1, "question is required"),
@@ -40,6 +52,16 @@ function validate<T extends z.ZodType>(schema: T, input: unknown): z.infer<T> {
   return result.data;
 }
 
+/** Turns a thrown error into a one-line message rather than a stack trace. */
+async function withFriendlyErrors(action: () => Promise<void>): Promise<void> {
+  try {
+    await action();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+}
+
 const ingest = defineCommand({
   meta: {
     name: "ingest",
@@ -51,14 +73,31 @@ const ingest = defineCommand({
       description: "file or directory to ingest",
       required: true,
     },
+    db: {
+      type: "string",
+      description: "where to write the database",
+      valueHint: "path",
+    },
+    size: {
+      type: "string",
+      description: "approximate tokens per chunk",
+      valueHint: "n",
+    },
+    overlap: {
+      type: "string",
+      description: "approximate tokens shared between neighbouring chunks",
+      valueHint: "n",
+    },
   },
-  run({ args }) {
-    const { source } = validate(ingestSchema, { source: args.source });
+  async run({ args }) {
+    const { source, db, size, overlap } = validate(ingestSchema, {
+      source: args.source,
+      db: args.db,
+      size: args.size,
+      overlap: args.overlap,
+    });
 
-    // Week 2: walk the path, chunk at ~500 tokens with 50-token overlap,
-    // embed each chunk, write to SQLite + sqlite-vec.
-    console.log(`ingest: ${source}`);
-    console.error("not implemented (Week 2)");
+    await withFriendlyErrors(() => ingestPath(source, { dbPath: db, size, overlap }));
   },
 });
 
