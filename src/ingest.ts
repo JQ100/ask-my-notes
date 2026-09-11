@@ -6,8 +6,15 @@ import { readdir, stat } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
 
 import { chunkText, type ChunkOptions } from "./chunk.ts";
-import { createEmbedder, embedAll } from "./embed.ts";
-import { countChunks, ensureVectorTable, openDatabase, saveDocument, type StoredChunk } from "./db.ts";
+import { BATCH_SIZE, createEmbedder } from "./embed.ts";
+import {
+  appendChunks,
+  beginDocument,
+  countChunks,
+  ensureVectorTable,
+  openDatabase,
+  type StoredChunk,
+} from "./db.ts";
 
 /** Plain-text formats only; PDFs and the like would each need a parser. */
 const TEXT_EXTENSIONS = new Set([".md", ".markdown", ".txt", ".text"]);
@@ -72,9 +79,9 @@ export async function ingestPath(source: string, options: IngestOptions = {}): P
     return;
   }
 
-  // Chunk everything first so the embedding calls can be batched across documents.
+  // Chunk everything up front so embedding calls batch across document boundaries.
   const pending = documents.flatMap((document) =>
-    chunkText(document.text, options).map((chunk) => ({ document, chunk })),
+    chunkText(document.text, options).map((chunk) => ({ source: document.source, chunk })),
   );
 
   if (pending.length === 0) {
@@ -87,34 +94,53 @@ export async function ingestPath(source: string, options: IngestOptions = {}): P
     `ingest: ${documents.length} document(s), ${pending.length} chunk(s) via ${embedder.provider}/${embedder.model}`,
   );
 
-  const vectors = await embedAll(
-    embedder,
-    pending.map((item) => item.chunk.text),
-    (done, total) => process.stdout.write(`\rembedded ${done}/${total}`),
-  );
-  process.stdout.write("\n");
-
-  const dimensions = vectors[0]?.length;
-  if (!dimensions) throw new Error("embedding provider returned no vectors");
-
   const db = openDatabase(options.dbPath);
+  const documentIds = new Map<string, number>();
+  let vectorTableReady = false;
+  let stored = 0;
+
   try {
-    ensureVectorTable(db, dimensions);
+    for (let start = 0; start < pending.length; start += BATCH_SIZE) {
+      const batch = pending.slice(start, start + BATCH_SIZE);
+      const vectors = await embedder.embed(batch.map((item) => item.chunk.text));
 
-    // Regroup by document so each is written in a single transaction.
-    const byDocument = new Map<string, StoredChunk[]>();
-    for (const [index, item] of pending.entries()) {
-      const embedding = vectors[index];
-      if (!embedding) throw new Error(`missing embedding for chunk ${index}`);
+      const dimensions = vectors[0]?.length;
+      if (!dimensions) throw new Error("embedding provider returned no vectors");
+      if (!vectorTableReady) {
+        ensureVectorTable(db, dimensions);
+        vectorTableReady = true;
+      }
 
-      const chunks = byDocument.get(item.document.source) ?? [];
-      chunks.push({ chunkIndex: item.chunk.index, text: item.chunk.text, embedding });
-      byDocument.set(item.document.source, chunks);
+      // Group this batch by document so each write is a single transaction.
+      const grouped = new Map<string, StoredChunk[]>();
+      for (const [offset, item] of batch.entries()) {
+        const embedding = vectors[offset];
+        if (!embedding) throw new Error(`missing embedding for chunk ${start + offset}`);
+
+        const chunks = grouped.get(item.source) ?? [];
+        chunks.push({ chunkIndex: item.chunk.index, text: item.chunk.text, embedding });
+        grouped.set(item.source, chunks);
+      }
+
+      for (const [documentSource, chunks] of grouped) {
+        let documentId = documentIds.get(documentSource);
+        if (documentId === undefined) {
+          documentId = beginDocument(db, documentSource);
+          documentIds.set(documentSource, documentId);
+        }
+        appendChunks(db, documentId, chunks);
+      }
+
+      stored += batch.length;
+      process.stdout.write(`\rstored ${stored}/${pending.length} chunk(s)`);
     }
 
-    for (const [documentSource, chunks] of byDocument) saveDocument(db, documentSource, chunks);
-
-    console.log(`stored ${pending.length} chunk(s); database now holds ${countChunks(db)}`);
+    process.stdout.write("\n");
+    console.log(`database now holds ${countChunks(db)} chunk(s)`);
+  } catch (error) {
+    process.stdout.write("\n");
+    if (stored > 0) console.error(`kept ${stored} chunk(s) written before the failure`);
+    throw error;
   } finally {
     db.close();
   }

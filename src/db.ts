@@ -98,15 +98,24 @@ export function ensureVectorTable(db: Database, dimensions: number): void {
   db.run("insert into meta (key, value) values ('dimensions', ?)", [String(dimensions)]);
 }
 
-/** Inserts a document and its chunks, replacing any earlier ingest of the same source. */
-export function saveDocument(db: Database, source: string, chunks: StoredChunk[]): void {
-  const save = db.transaction((): void => {
+/**
+ * Clears any previous ingest of `source` and returns a fresh document id.
+ *
+ * Chunks are appended afterwards, batch by batch, so a crash mid-ingest leaves
+ * the document partially populated rather than losing the whole run. That is a
+ * deliberate trade of atomicity for resumability and progress reporting.
+ */
+export function beginDocument(db: Database, source: string): number {
+  const start = db.transaction((): number => {
     const existing = db
       .query<{ id: number }, [string]>("select id from documents where source = ?")
       .get(source);
 
     if (existing) {
-      db.run("delete from chunk_vectors where chunk_id in (select id from chunks where document_id = ?)", [existing.id]);
+      db.run(
+        "delete from chunk_vectors where chunk_id in (select id from chunks where document_id = ?)",
+        [existing.id],
+      );
       db.run("delete from documents where id = ?", [existing.id]);
     }
 
@@ -114,17 +123,21 @@ export function saveDocument(db: Database, source: string, chunks: StoredChunk[]
       source,
       new Date().toISOString(),
     ]);
-    const documentId = Number(
-      db.query<{ id: number }, []>("select last_insert_rowid() as id").get()?.id,
-    );
 
-    const insertChunk = db.prepare(
-      "insert into chunks (document_id, chunk_index, text) values (?, ?, ?)",
-    );
-    const insertVector = db.prepare(
-      "insert into chunk_vectors (chunk_id, embedding) values (?, ?)",
-    );
+    return Number(db.query<{ id: number }, []>("select last_insert_rowid() as id").get()?.id);
+  });
 
+  return start();
+}
+
+/** Appends chunks and their vectors to an existing document, in one transaction. */
+export function appendChunks(db: Database, documentId: number, chunks: StoredChunk[]): void {
+  const insertChunk = db.prepare(
+    "insert into chunks (document_id, chunk_index, text) values (?, ?, ?)",
+  );
+  const insertVector = db.prepare("insert into chunk_vectors (chunk_id, embedding) values (?, ?)");
+
+  const append = db.transaction((): void => {
     for (const chunk of chunks) {
       insertChunk.run(documentId, chunk.chunkIndex, chunk.text);
       const chunkId = Number(
@@ -134,7 +147,7 @@ export function saveDocument(db: Database, source: string, chunks: StoredChunk[]
     }
   });
 
-  save();
+  append();
 }
 
 export function countChunks(db: Database): number {

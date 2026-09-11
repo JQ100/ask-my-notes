@@ -16,7 +16,7 @@ export interface Embedder {
 }
 
 /** Providers cap inputs per request; stay well under the lowest cap. */
-const BATCH_SIZE = 96;
+export const BATCH_SIZE = Number(process.env.EMBED_BATCH_SIZE ?? 96);
 
 const responseSchema = z.object({
   data: z.array(z.object({ embedding: z.array(z.number()) })),
@@ -27,21 +27,39 @@ function endpoint(base: string, env: Record<string, string | undefined>): string
   return `${env.EMBED_BASE_URL ?? base}/v1/embeddings`;
 }
 
+/** Free tiers rate-limit aggressively, so 429s are routine rather than exceptional. */
+const MAX_ATTEMPTS = 8;
+const MAX_BACKOFF_MS = 90_000;
+
 async function post(url: string, key: string, body: unknown): Promise<number[][]> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-    body: JSON.stringify(body),
-  });
+  for (let attempt = 1; ; attempt++) {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+      body: JSON.stringify(body),
+    });
 
-  if (!response.ok) {
-    throw new Error(`embedding request failed (${response.status}): ${await response.text()}`);
+    if (response.status === 429 && attempt < MAX_ATTEMPTS) {
+      // Honour Retry-After when the provider sends one; otherwise back off exponentially.
+      const retryAfter = Number(response.headers.get("retry-after"));
+      const wait = Number.isFinite(retryAfter) && retryAfter > 0
+        ? retryAfter * 1000
+        : Math.min(MAX_BACKOFF_MS, 2 ** attempt * 1000);
+
+      process.stdout.write(`\rrate limited, waiting ${Math.round(wait / 1000)}s (attempt ${attempt})`);
+      await Bun.sleep(wait);
+      continue;
+    }
+
+    if (!response.ok) {
+      throw new Error(`embedding request failed (${response.status}): ${await response.text()}`);
+    }
+
+    const parsed = responseSchema.safeParse(await response.json());
+    if (!parsed.success) throw new Error("embedding response did not match the expected shape");
+
+    return parsed.data.data.map((item) => item.embedding);
   }
-
-  const parsed = responseSchema.safeParse(await response.json());
-  if (!parsed.success) throw new Error("embedding response did not match the expected shape");
-
-  return parsed.data.data.map((item) => item.embedding);
 }
 
 /**
@@ -78,20 +96,4 @@ export function createEmbedder(env: Record<string, string | undefined> = process
   throw new Error(
     "no embedding API key found — set VOYAGE_API_KEY or OPENAI_API_KEY (a .env file works)",
   );
-}
-
-/** Embeds any number of texts, batching to respect per-request limits. */
-export async function embedAll(
-  embedder: Embedder,
-  texts: string[],
-  onProgress?: (done: number, total: number) => void,
-): Promise<number[][]> {
-  const vectors: number[][] = [];
-
-  for (let start = 0; start < texts.length; start += BATCH_SIZE) {
-    vectors.push(...(await embedder.embed(texts.slice(start, start + BATCH_SIZE))));
-    onProgress?.(Math.min(start + BATCH_SIZE, texts.length), texts.length);
-  }
-
-  return vectors;
 }
