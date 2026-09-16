@@ -10,6 +10,7 @@
     "fetch-dataset": "bun run scripts/fetch-dataset.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.126.0",
     "citty": "^0.2.2",
     "sqlite-vec": "^0.1.9",
     "zod": "^4.5.4"
