@@ -8,11 +8,18 @@
 
 import { z } from "zod";
 
+/**
+ * Voyage embeds documents and queries into the same space but asymmetrically —
+ * a question embedded as a document retrieves noticeably worse. OpenAI has no
+ * such distinction and ignores the hint.
+ */
+export type EmbedInputType = "document" | "query";
+
 export interface Embedder {
   readonly provider: "voyage" | "openai";
   readonly model: string;
   /** Embeds a batch of texts, returning one vector per input, in order. */
-  embed(texts: string[]): Promise<number[][]>;
+  embed(texts: string[], inputType?: EmbedInputType): Promise<number[][]>;
 }
 
 /** Providers cap inputs per request; stay well under the lowest cap. */
@@ -73,11 +80,11 @@ export function createEmbedder(env: Record<string, string | undefined> = process
     return {
       provider: "voyage",
       model,
-      embed: (texts) =>
+      embed: (texts, inputType = "document") =>
         post(endpoint("https://api.voyageai.com", env), voyageKey, {
           model,
           input: texts,
-          input_type: "document",
+          input_type: inputType,
         }),
     };
   }

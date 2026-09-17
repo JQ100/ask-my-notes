@@ -153,3 +153,46 @@ export function appendChunks(db: Database, documentId: number, chunks: StoredChu
 export function countChunks(db: Database): number {
   return db.query<{ n: number }, []>("select count(*) as n from chunks").get()?.n ?? 0;
 }
+
+export interface SearchHit {
+  chunkId: number;
+  /** The document this chunk came from, shown as the citation. */
+  source: string;
+  chunkIndex: number;
+  text: string;
+  /** Cosine-ish distance from sqlite-vec; smaller is closer. */
+  distance: number;
+}
+
+/**
+ * Nearest neighbours to `embedding`, closest first.
+ *
+ * `match` plus `k` is sqlite-vec's KNN form — a plain `order by ... limit` would
+ * scan every vector instead of using the index.
+ */
+export function searchChunks(db: Database, embedding: number[], k: number): SearchHit[] {
+  const row = db.query<{ value: string }, []>("select value from meta where key = 'dimensions'").get();
+
+  if (!row) throw new Error("this database holds no embeddings yet — run `ingest` first");
+  if (Number(row.value) !== embedding.length) {
+    throw new Error(
+      `this database holds ${row.value}-dimension vectors but the current model produces ` +
+        `${embedding.length} — re-ingest with the same model, or point at a different database`,
+    );
+  }
+
+  return db
+    .query<SearchHit, [Float32Array, number]>(
+      `select v.chunk_id    as chunkId,
+              d.source      as source,
+              c.chunk_index as chunkIndex,
+              c.text        as text,
+              v.distance    as distance
+         from chunk_vectors v
+         join chunks c    on c.id = v.chunk_id
+         join documents d on d.id = c.document_id
+        where v.embedding match ? and k = ?
+        order by v.distance`,
+    )
+    .all(new Float32Array(embedding), k);
+}

@@ -16,6 +16,7 @@ import { z } from "zod";
 import { DEFAULT_CHUNK_OVERLAP, DEFAULT_CHUNK_SIZE } from "./src/chunk.ts";
 import { DEFAULT_DB_PATH } from "./src/db.ts";
 import { ingestPath } from "./src/ingest.ts";
+import { answerQuestion } from "./src/query.ts";
 
 const ingestSchema = z
   .object({
@@ -31,6 +32,7 @@ const ingestSchema = z
 
 const querySchema = z.object({
   question: z.string().min(1, "question is required"),
+  db: z.string().min(1).default(DEFAULT_DB_PATH),
   topK: z.coerce
     .number("top-k must be a number")
     .int("top-k must be a whole number")
@@ -118,17 +120,20 @@ const query = defineCommand({
       description: "how many chunks to retrieve (1-50)",
       valueHint: "n",
     },
+    db: {
+      type: "string",
+      description: "which database to read",
+      valueHint: "path",
+    },
   },
-  run({ args }) {
-    const { question, topK } = validate(querySchema, {
+  async run({ args }) {
+    const { question, topK, db } = validate(querySchema, {
       question: args.question,
       topK: args.topK,
+      db: args.db,
     });
 
-    // Week 3: embed the question, top-K vector search, build the prompt,
-    // stream Claude's answer, print which chunks were cited.
-    console.log(`query: ${question} (top ${topK})`);
-    console.error("not implemented (Week 3)");
+    await withFriendlyErrors(() => answerQuestion(question, { dbPath: db, topK }));
   },
 });
 
