@@ -55,7 +55,7 @@ There was a second bug of the same kind. The corpus writes "around 60,000" and t
 
 My first runs used 20 questions, because that's what felt like a reasonable eval set for a side project.
 
-At n=20 I measured 50% at k=3. At n=100, same seed, same code: 65%.
+At n=20 I measured 50% at k=3. At n=100, same seed, same code: 65%. (Both under the original substring metric, before the fix above — the point here is the gap, not the level.)
 
 That 15-point gap is pure sampling noise. With 20 questions the 95% interval is roughly ±22 points — wide enough to swallow any change you'd realistically be testing. Two different seeds at n=100 disagree by 1–5 points, which is a usable resolution.
 
@@ -69,22 +69,22 @@ So I added an FTS5 index over the same chunks and fused the two rankings with re
 
 | | k=1 | k=3 | k=5 | k=10 |
 |---|---|---|---|---|
-| vector | 68% | 78% | 81% | 82% |
-| keyword | 59% | 70% | 77% | 81% |
-| hybrid | 66% | 77% | 81% | 82% |
+| vector | 69% | 79% | 82% | **83%** |
+| keyword | 60% | 71% | 78% | 82% |
+| hybrid | 67% | 78% | 82% | 83% |
 
 Hybrid tied vector at best and lost at low k. Before touching the fusion weights, I measured *why* — how often each retriever finds something the other misses, at k=10:
 
 ```
-both retrievers found it   79
+both retrievers found it   80
 vector only                 3
 keyword only                2   <- everything fusion could rescue
-neither                    16
+neither                    15
 
-vector alone 82%      perfect fusion ceiling 84%
+vector alone 83%      perfect fusion ceiling 85%
 ```
 
-**Two points of headroom, total.** No fusion scheme — RRF, weighted, learned — can do better than 84% here, and RRF spent its two points demoting good vector hits. That's not a tuning problem, and an afternoon of tuning would have found nothing.
+**Two points of headroom, total.** No fusion scheme — RRF, weighted, learned — can do better than 85% here, and RRF spent its two points demoting good vector hits. That's not a tuning problem, and an afternoon of tuning would have found nothing.
 
 Why so much agreement? These are natural-language questions against encyclopedic prose, where the answering passage shares both meaning *and* vocabulary with the question. Hybrid earns its keep when queries carry exact tokens that embeddings smear — surnames, error codes, part numbers, function names. This corpus has almost none.
 
@@ -119,15 +119,15 @@ Any technique that adds text per hit has to be compared at matched context, not 
 
 ## Then I read the misses
 
-16 questions were found by neither retriever. I read all 16, which took twenty minutes and should have been the first thing I did.
+15 questions were found by neither retriever. I read all 15, which took twenty minutes and should have been the first thing I did.
 
 Eight of them are not answerable by any system: *"What is the first number on the page?"*, *"What is the last word on the page?"*, *"When did he die?"* (no referent), *"What happened in recent years?"*, one requiring arithmetic across two facts, one whose answer is "It is arguable."
 
-Three or four more were scorer artifacts — the right chunk retrieved, the answer phrased differently, or sitting just under my 80% threshold at 71% and 67%.
+Three more were scorer artifacts — the right chunk retrieved, the answer phrased differently, or sitting just under my 80% threshold at 71% and 67%.
 
-That leaves four or five genuine retrieval failures out of 100.
+That leaves four genuine retrieval failures out of 100.
 
-So the raw benchmark says 82%. Excluding questions with no answer in the corpus, it's closer to **93%**. Both numbers are true and the gap between them is the story: benchmarks contain junk, and a number you haven't inspected the failures of is not a measurement.
+So the raw benchmark says 83%. Excluding questions with no answer in the corpus, it's closer to **93%**. Both numbers are true and the gap between them is the story: benchmarks contain junk, and a number you haven't inspected the failures of is not a measurement.
 
 ## What I'd tell myself at the start
 

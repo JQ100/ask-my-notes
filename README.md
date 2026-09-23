@@ -99,12 +99,12 @@ Hit-rate on 3,200 Wikipedia passages, 100 questions, seed 1:
 | `hybrid` (RRF fusion) | 67% | 78% | 82% | 83% |
 
 Hybrid does not beat vector here, and a complementarity check says why: at
-k=10 the two retrievers agree on 79 of 100 questions and keyword rescues only
-2 that vector misses, so perfect fusion would reach 84% against vector's 82%.
+k=10 the two retrievers agree on 80 of 100 questions and keyword rescues only
+2 that vector misses, so perfect fusion would reach 85% against vector's 83%.
 
-Reading the 16 questions neither retriever finds is more informative than the
+Reading the 15 questions neither retriever finds is more informative than the
 aggregate — 8 are unanswerable standalone (*"What is the first number on the
-page?"*), 3–4 are scoring artifacts, and 4–5 are real failures. Excluding the
+page?"*), 3 are scoring artifacts, and 4 are real failures. Excluding the
 unanswerable ones puts retrieval near 93%.
 
 | Flag | Purpose |
