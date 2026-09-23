@@ -2,8 +2,9 @@
  * The ingest pipeline: read → chunk → embed → store.
  */
 
+import { homedir } from "node:os";
 import { readdir, stat } from "node:fs/promises";
-import { extname, join, relative } from "node:path";
+import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import { chunkText, type ChunkOptions } from "./chunk.ts";
 import { BATCH_SIZE, createEmbedder } from "./embed.ts";
@@ -18,6 +19,29 @@ import {
 
 /** Plain-text formats only; PDFs and the like would each need a parser. */
 const TEXT_EXTENSIONS = new Set([".md", ".markdown", ".txt", ".text"]);
+
+/**
+ * How a file is spelled in citations.
+ *
+ * Paths inside the project stay project-relative; anything else is written
+ * against the home directory, so notes elsewhere on disk read as
+ * "~/notes/ideas.md" rather than "../../../notes/ideas.md". Both forms stay
+ * unique per file, which matters because `documents.source` is the key an
+ * ingest replaces on.
+ */
+export function displaySource(path: string): string {
+  const absolute = resolve(path);
+  const cwd = process.cwd();
+  const home = homedir();
+
+  const within = (root: string): boolean =>
+    absolute === root || absolute.startsWith(root.endsWith(sep) ? root : root + sep);
+
+  if (within(cwd)) return relative(cwd, absolute);
+  if (within(home)) return `~/${relative(home, absolute)}`;
+
+  return isAbsolute(absolute) ? absolute : path;
+}
 
 export interface IngestOptions extends ChunkOptions {
   dbPath?: string;
@@ -54,7 +78,7 @@ async function readJsonl(path: string): Promise<Document[]> {
     const body = typeof passage === "string" ? passage : typeof text === "string" ? text : undefined;
     if (!body) continue;
 
-    documents.push({ source: `${path}#${id ?? lineNumber}`, text: body });
+    documents.push({ source: `${displaySource(path)}#${id ?? lineNumber}`, text: body });
   }
 
   return documents;
@@ -66,7 +90,7 @@ async function loadDocuments(path: string): Promise<Document[]> {
   const files = await collectFiles(path);
   return Promise.all(
     files.map(async (file) => ({
-      source: relative(process.cwd(), file) || file,
+      source: displaySource(file),
       text: await Bun.file(file).text(),
     })),
   );
