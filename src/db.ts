@@ -196,3 +196,115 @@ export function searchChunks(db: Database, embedding: number[], k: number): Sear
     )
     .all(new Float32Array(embedding), k);
 }
+
+/**
+ * Keyword search over the same chunks, using SQLite's built-in FTS5.
+ *
+ * Vector search is blind to exact tokens — a surname, an error code, a serial
+ * number — because those carry little semantic signal and get smeared across
+ * the embedding space. BM25 is the opposite: it only sees literal terms. The
+ * two fail in different places, which is the whole argument for running both.
+ */
+
+/** An FTS5 index over `chunks`, storing no text of its own. */
+export function ensureKeywordIndex(db: Database): void {
+  db.run(
+    `create virtual table if not exists chunks_fts using fts5(
+       text,
+       content='chunks',
+       content_rowid='id',
+       tokenize='porter unicode61'
+     )`,
+  );
+
+  // Rebuilding is milliseconds at this scale, and it keeps the index honest
+  // after an ingest without needing triggers on the chunks table.
+  db.run("insert into chunks_fts(chunks_fts) values('rebuild')");
+}
+
+/**
+ * Questions are prose, and FTS5's query language would choke on the
+ * punctuation, so reduce to bare terms joined by OR.
+ */
+function ftsQuery(text: string): string {
+  const terms = text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .split(/\s+/)
+    .filter((term) => term.length > 1);
+
+  return [...new Set(terms)].map((term) => `"${term}"`).join(" OR ");
+}
+
+export function keywordSearch(db: Database, text: string, k: number): number[] {
+  const match = ftsQuery(text);
+  if (!match) return [];
+
+  return db
+    .query<{ chunkId: number }, [string, number]>(
+      "select rowid as chunkId from chunks_fts where chunks_fts match ? order by rank limit ?",
+    )
+    .all(match, k)
+    .map((row) => row.chunkId);
+}
+
+export interface FusedHit {
+  chunkId: number;
+  source: string;
+  chunkIndex: number;
+  text: string;
+  /** Reciprocal-rank-fusion score; larger is better. */
+  score: number;
+}
+
+/** Reciprocal rank fusion: rank position matters, raw scores do not. */
+const RRF_K = 60;
+
+/**
+ * Merges the two rankings by position rather than by score.
+ *
+ * Distances and BM25 scores live on incommensurable scales, so adding them
+ * would be meaningless. RRF sidesteps that: a chunk ranked 1st by either
+ * retriever scores 1/(60+1), and agreement between them accumulates.
+ */
+export function hybridSearch(
+  db: Database,
+  embedding: number[],
+  text: string,
+  k: number,
+): FusedHit[] {
+  // Fuse over a deeper pool than we return, so a chunk ranked 8th by one
+  // retriever and 2nd by the other can still surface.
+  const pool = Math.max(k * 4, 20);
+
+  const vector = searchChunks(db, embedding, pool).map((hit) => hit.chunkId);
+  const keyword = keywordSearch(db, text, pool);
+
+  const scores = new Map<number, number>();
+  for (const ranking of [vector, keyword]) {
+    ranking.forEach((chunkId, index) => {
+      scores.set(chunkId, (scores.get(chunkId) ?? 0) + 1 / (RRF_K + index + 1));
+    });
+  }
+
+  const top = [...scores.entries()]
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, k);
+  if (top.length === 0) return [];
+
+  const rows = db
+    .query<Omit<FusedHit, "score">, []>(
+      `select c.id as chunkId, d.source as source, c.chunk_index as chunkIndex, c.text as text
+         from chunks c
+         join documents d on d.id = c.document_id
+        where c.id in (${top.map(([id]) => id).join(",")})`,
+    )
+    .all();
+
+  const byId = new Map(rows.map((row) => [row.chunkId, row]));
+
+  return top.flatMap(([chunkId, score]) => {
+    const row = byId.get(chunkId);
+    return row ? [{ ...row, score }] : [];
+  });
+}
