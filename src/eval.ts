@@ -16,10 +16,17 @@ export interface QAPair {
   answer: string;
 }
 
-/** Lowercase, strip punctuation, collapse whitespace — so "Booth." matches "Booth". */
+/**
+ * Lowercase, strip punctuation, collapse whitespace — so "Booth." matches "Booth".
+ *
+ * Digit separators go first: the corpus writes "60,000" and the answer key
+ * writes "60000", and stripping punctuation blindly turned the former into two
+ * tokens that could never match the latter.
+ */
 export function normalize(text: string): string {
   return text
     .toLowerCase()
+    .replace(/(\d)[,_\u00a0](?=\d)/g, "$1")
     .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();

@@ -10,6 +10,15 @@ describe("normalize", () => {
   test("collapses whitespace", () => {
     expect(normalize("  Hardin   County\n")).toBe("hardin county");
   });
+
+  test("joins digit groups so 60,000 matches 60000", () => {
+    expect(normalize("around 60,000,")).toBe("around 60000");
+    expect(normalize("60000")).toBe("60000");
+  });
+
+  test("leaves non-numeric commas alone", () => {
+    expect(normalize("Turin, Italy")).toBe("turin italy");
+  });
 });
 
 describe("isScorable", () => {

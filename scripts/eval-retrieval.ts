@@ -6,6 +6,7 @@
  *   bun run scripts/eval-retrieval.ts          # 20 questions, k = 1/3/5/10
  *   bun run scripts/eval-retrieval.ts --n 100 --seed 7 --db data/notes.db
  *   bun run scripts/eval-retrieval.ts --mode hybrid   # vector | keyword | hybrid
+ *   bun run scripts/eval-retrieval.ts --expand 1      # widen each hit by ±1 chunk
  *
  * No Claude calls — this measures retrieval alone, so a run costs one batch of
  * embeddings and a few seconds. Generation quality is a separate question and
@@ -18,6 +19,7 @@ import {
   ensureKeywordIndex,
   hybridSearch,
   keywordSearch,
+  neighbourhood,
   openDatabase,
   searchChunks,
 } from "../src/db.ts";
@@ -35,6 +37,7 @@ const count = Number(flag("n", "20"));
 const seed = Number(flag("seed", "1"));
 const dbPath = flag("db", DEFAULT_DB_PATH);
 const mode = flag("mode", "vector");
+const expand = Number(flag("expand", "0"));
 if (!["vector", "keyword", "hybrid"].includes(mode)) {
   console.error(`unknown --mode ${mode} (expected vector, keyword or hybrid)`);
   process.exit(1);
@@ -83,21 +86,24 @@ const textById = db
   .all();
 const chunkText = new Map(textById.map((row) => [row.id, row.text]));
 
+/** With expansion on, each retrieved hit becomes a window of surrounding text. */
+const render = (chunkId: number): string =>
+  expand > 0 ? neighbourhood(db, chunkId, expand) : (chunkText.get(chunkId) ?? "");
+
 const results = chosen.map((pair, index) => {
   if (mode === "keyword") {
-    const ids = keywordSearch(db, pair.question, maxK);
-    return { pair, ranked: ids.flatMap((id) => (chunkText.has(id) ? [chunkText.get(id)!] : [])) };
+    return { pair, ranked: keywordSearch(db, pair.question, maxK).map(render) };
   }
 
   const vector = vectors[index];
   if (!vector) throw new Error(`missing embedding for question ${pair.id}`);
 
-  const ranked =
+  const ids =
     mode === "hybrid"
-      ? hybridSearch(db, vector, pair.question, maxK).map((hit) => hit.text)
-      : searchChunks(db, vector, maxK).map((hit) => hit.text);
+      ? hybridSearch(db, vector, pair.question, maxK).map((hit) => hit.chunkId)
+      : searchChunks(db, vector, maxK).map((hit) => hit.chunkId);
 
-  return { pair, ranked };
+  return { pair, ranked: ids.map(render) };
 });
 db.close();
 
@@ -106,7 +112,8 @@ const rates = hitRates(
   CUTOFFS,
 );
 
-console.log(`\nhit-rate on ${dbPath} (${mode})`);
+const window = expand > 0 ? `, ±${expand} chunk window (up to ${2 * expand + 1}x the text per hit)` : "";
+console.log(`\nhit-rate on ${dbPath} (${mode}${window})`);
 for (const k of CUTOFFS) {
   const rate = rates.get(k) ?? 0;
   const bar = "█".repeat(Math.round(rate * 30)).padEnd(30, "·");

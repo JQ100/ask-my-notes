@@ -308,3 +308,34 @@ export function hybridSearch(
     return row ? [{ ...row, score }] : [];
   });
 }
+
+/**
+ * The text around a chunk, not just the chunk itself.
+ *
+ * Chunk ids are handed out in reading order at ingest — document by document,
+ * chunk_index ascending — so neighbouring ids are neighbouring text. That makes
+ * `id ± radius` a cheap stand-in for "the passage this sentence came from",
+ * which matters when a chunk lost its subject to the split: "He graduated in
+ * ecclesiastical law" is unfindable by name, while the passage before it says
+ * "Amedeo Avogadro was born in Turin".
+ *
+ * The assumption breaks at document boundaries, where id+1 is an unrelated
+ * document. That is tolerable for a sequential corpus and the reason this is an
+ * eval-time option rather than the CLI's default.
+ */
+export function neighbourhood(db: Database, chunkId: number, radius: number): string {
+  if (radius <= 0) {
+    return (
+      db.query<{ text: string }, [number]>("select text from chunks where id = ?").get(chunkId)
+        ?.text ?? ""
+    );
+  }
+
+  return db
+    .query<{ text: string }, [number, number]>(
+      "select text from chunks where id between ? and ? order by id",
+    )
+    .all(chunkId - radius, chunkId + radius)
+    .map((row) => row.text)
+    .join(" ");
+}
