@@ -7,7 +7,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "fetch-dataset": "bun run scripts/fetch-dataset.ts"
+    "fetch-dataset": "bun run scripts/fetch-dataset.ts",
+    "eval": "bun run scripts/eval-retrieval.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.126.0",
