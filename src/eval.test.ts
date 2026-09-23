@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { answerFound, hitRates, isScorable, normalize, sample } from "./eval.ts";
+import { answerFound, contentTokens, hitRates, isScorable, normalize, sample, tokenRecall } from "./eval.ts";
 
 describe("normalize", () => {
   test("strips punctuation and case", () => {
@@ -23,6 +23,22 @@ describe("isScorable", () => {
   });
 });
 
+describe("contentTokens", () => {
+  test("drops stopwords", () => {
+    expect(contentTokens("Switzerland and Austria.")).toEqual(["switzerland", "austria"]);
+  });
+});
+
+describe("tokenRecall", () => {
+  test("is 1 when every content word is present", () => {
+    expect(tokenRecall("Switzerland and Austria", "bordered by Switzerland and Austria")).toBe(1);
+  });
+
+  test("is partial when some are missing", () => {
+    expect(tokenRecall("Hardin County Kentucky", "born in Hardin County")).toBeCloseTo(2 / 3);
+  });
+});
+
 describe("answerFound", () => {
   test("matches across punctuation and case", () => {
     expect(answerFound("John Wilkes Booth", ["...shot by John Wilkes Booth, an actor."])).toBe(true);
@@ -30,6 +46,16 @@ describe("answerFound", () => {
 
   test("does not match when absent", () => {
     expect(answerFound("1832", ["Lincoln was born in 1809."])).toBe(false);
+  });
+
+  // The case that motivated token overlap: correct retrieval, non-contiguous answer.
+  test("matches when the answer is split across the sentence", () => {
+    const chunk = "a tiny alpine country, bordered by Switzerland to its west and by Austria to its east";
+    expect(answerFound("Switzerland and Austria.", [chunk])).toBe(true);
+  });
+
+  test("still rejects a chunk holding only part of the answer", () => {
+    expect(answerFound("Switzerland and Austria", ["bordered by Switzerland to its west"])).toBe(false);
   });
 });
 

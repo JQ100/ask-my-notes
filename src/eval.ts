@@ -31,11 +31,55 @@ export function isScorable(pair: QAPair): boolean {
   return answer.length > 0 && answer !== "yes" && answer !== "no";
 }
 
-/** True when the answer appears in any of the given chunk texts. */
-export function answerFound(answer: string, chunks: string[]): boolean {
+/**
+ * Words too common to carry evidence. Requiring them made correct retrievals
+ * score as misses: the corpus says "bordered by Switzerland to its west and by
+ * Austria to its east" while the answer key says "Switzerland and Austria", and
+ * exact-substring matching called that wrong.
+ */
+const STOPWORDS = new Set(
+  ("a an and are as at be by for from had has have he her his in is it its of on or per she " +
+    "that the their them they this to was were which who with").split(" "),
+);
+
+export function contentTokens(text: string): string[] {
+  return normalize(text)
+    .split(" ")
+    .filter((token) => token.length > 0 && !STOPWORDS.has(token));
+}
+
+/** Fraction of the answer's content words present in one chunk. */
+export function tokenRecall(answer: string, chunk: string): number {
+  const wanted = contentTokens(answer);
+  if (wanted.length === 0) return 0;
+
+  const present = new Set(contentTokens(chunk));
+  return wanted.filter((token) => present.has(token)).length / wanted.length;
+}
+
+/** How much of the answer must appear before a chunk counts as containing it. */
+export const DEFAULT_THRESHOLD = 0.8;
+
+/**
+ * True when a chunk contains the answer verbatim, or holds at least
+ * `threshold` of its content words.
+ *
+ * Known limitation: an answer that reduces to a single common content word
+ * ("In the water they are" → "water") will match almost anything. Those come
+ * from questions that are unanswerable standalone anyway, and the error is
+ * constant across runs, so before/after comparisons still hold.
+ */
+export function answerFound(
+  answer: string,
+  chunks: string[],
+  threshold: number = DEFAULT_THRESHOLD,
+): boolean {
   const needle = normalize(answer);
   if (!needle) return false;
-  return chunks.some((chunk) => normalize(chunk).includes(needle));
+
+  return chunks.some(
+    (chunk) => normalize(chunk).includes(needle) || tokenRecall(answer, chunk) >= threshold,
+  );
 }
 
 /**
@@ -47,12 +91,13 @@ export function answerFound(answer: string, chunks: string[]): boolean {
 export function hitRates(
   results: { answer: string; ranked: string[] }[],
   cutoffs: number[],
+  threshold: number = DEFAULT_THRESHOLD,
 ): Map<number, number> {
   const rates = new Map<number, number>();
   if (results.length === 0) return rates;
 
   for (const k of cutoffs) {
-    const hits = results.filter((r) => answerFound(r.answer, r.ranked.slice(0, k))).length;
+    const hits = results.filter((r) => answerFound(r.answer, r.ranked.slice(0, k), threshold)).length;
     rates.set(k, hits / results.length);
   }
 
