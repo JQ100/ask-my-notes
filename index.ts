@@ -18,10 +18,22 @@ import { DEFAULT_DB_PATH } from "./src/db.ts";
 import { ingestPath } from "./src/ingest.ts";
 import { answerQuestion } from "./src/query.ts";
 
+/** Repeatable flag, or one comma-separated value — citty hands back either shape. */
+const excludeSchema = z
+  .union([z.string(), z.array(z.string())])
+  .optional()
+  .transform((value) =>
+    (Array.isArray(value) ? value : value === undefined ? [] : [value])
+      .flatMap((entry) => entry.split(","))
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0),
+  );
+
 const ingestSchema = z
   .object({
     source: z.string().min(1, "path is required"),
     db: z.string().min(1).default(DEFAULT_DB_PATH),
+    exclude: excludeSchema,
     size: z.coerce.number().int().min(1).max(8000).default(DEFAULT_CHUNK_SIZE),
     overlap: z.coerce.number().int().min(0).max(8000).default(DEFAULT_CHUNK_OVERLAP),
   })
@@ -90,16 +102,22 @@ const ingest = defineCommand({
       description: "approximate tokens shared between neighbouring chunks",
       valueHint: "n",
     },
+    exclude: {
+      type: "string",
+      description: "skip files matching this glob (repeatable, or comma-separated)",
+      valueHint: "glob",
+    },
   },
   async run({ args }) {
-    const { source, db, size, overlap } = validate(ingestSchema, {
+    const { source, db, size, overlap, exclude } = validate(ingestSchema, {
       source: args.source,
       db: args.db,
       size: args.size,
       overlap: args.overlap,
+      exclude: args.exclude,
     });
 
-    await withFriendlyErrors(() => ingestPath(source, { dbPath: db, size, overlap }));
+    await withFriendlyErrors(() => ingestPath(source, { dbPath: db, size, overlap, exclude }));
   },
 });
 

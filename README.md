@@ -48,7 +48,7 @@ Quote multi-word questions — the question is a single positional argument.
 
 | Command | Argument | Options |
 | --- | --- | --- |
-| `ingest` | `<path>` | `--db <path>`, `--size <n>`, `--overlap <n>` |
+| `ingest` | `<path>` | `--db <path>`, `--size <n>`, `--overlap <n>`, `--exclude <glob>` |
 | `query` | `<question>` | `-k, --topK <n>` (1–50, default 5), `--db <path>` |
 
 An answer streams as it is generated, then the retrieved sources print with
@@ -69,6 +69,26 @@ sources:
 `ingest` accepts a single file, a directory (walked recursively for `.md` and
 `.txt`), or a `.jsonl` file where each line is one document. Re-ingesting the
 same source replaces its previous chunks rather than duplicating them.
+
+`--exclude` skips files by glob, and is repeatable or comma-separated:
+
+```sh
+bun run index.ts ingest ~/notes --db data/mine.db   --exclude 'secrets.txt' --exclude '**/private/**'
+```
+
+Patterns follow gitignore-style anchoring, which is easy to get wrong in the
+direction that matters:
+
+| Pattern | Matches |
+| --- | --- |
+| `secrets.txt` | a file with that name **at any depth** |
+| `private/**` | only `private/` **directly under the ingest root** |
+| `**/private/**` | a `private/` directory at any depth |
+
+A pattern containing `/` is anchored to the root, so `private/**` silently
+*includes* `deep/private/notes.txt`. Prefix with `**/` when depth is unknown —
+and check the `N document(s)` count before the embedding starts, since ingest
+sends file contents to a third-party embedding API.
 
 ### Environment
 

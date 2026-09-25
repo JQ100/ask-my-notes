@@ -45,6 +45,26 @@ export function displaySource(path: string): string {
 
 export interface IngestOptions extends ChunkOptions {
   dbPath?: string;
+  /** Glob patterns; matching files are skipped. */
+  exclude?: string[];
+}
+
+/**
+ * Whether a file is excluded by any pattern.
+ *
+ * Each pattern is tested against the path relative to the ingest root and
+ * against the bare filename, so `--exclude '*.log'` catches a log file at any
+ * depth while `--exclude 'private/**'` scopes to one subtree.
+ */
+export function isExcluded(relativePath: string, patterns: string[]): boolean {
+  if (patterns.length === 0) return false;
+
+  const name = relativePath.split("/").pop() ?? relativePath;
+
+  return patterns.some((pattern) => {
+    const glob = new Bun.Glob(pattern);
+    return glob.match(relativePath) || glob.match(name);
+  });
 }
 
 export interface Document {
@@ -53,14 +73,17 @@ export interface Document {
   text: string;
 }
 
-async function collectFiles(path: string): Promise<string[]> {
+async function collectFiles(path: string, exclude: string[]): Promise<string[]> {
   const info = await stat(path);
-  if (info.isFile()) return [path];
+  if (info.isFile()) {
+    return isExcluded(path.split("/").pop() ?? path, exclude) ? [] : [path];
+  }
 
   const entries = await readdir(path, { recursive: true, withFileTypes: true });
   return entries
     .filter((entry) => entry.isFile() && TEXT_EXTENSIONS.has(extname(entry.name).toLowerCase()))
     .map((entry) => join(entry.parentPath, entry.name))
+    .filter((file) => !isExcluded(relative(path, file), exclude))
     .sort();
 }
 
@@ -84,10 +107,10 @@ async function readJsonl(path: string): Promise<Document[]> {
   return documents;
 }
 
-async function loadDocuments(path: string): Promise<Document[]> {
+async function loadDocuments(path: string, exclude: string[]): Promise<Document[]> {
   if (extname(path).toLowerCase() === ".jsonl") return readJsonl(path);
 
-  const files = await collectFiles(path);
+  const files = await collectFiles(path, exclude);
   return Promise.all(
     files.map(async (file) => ({
       source: displaySource(file),
@@ -97,9 +120,11 @@ async function loadDocuments(path: string): Promise<Document[]> {
 }
 
 export async function ingestPath(source: string, options: IngestOptions = {}): Promise<void> {
-  const documents = await loadDocuments(source);
+  const exclude = options.exclude ?? [];
+  const documents = await loadDocuments(source, exclude);
   if (documents.length === 0) {
-    console.error(`nothing to ingest at ${source}`);
+    const because = exclude.length > 0 ? ` (after --exclude ${exclude.join(", ")})` : "";
+    console.error(`nothing to ingest at ${source}${because}`);
     return;
   }
 
