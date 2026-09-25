@@ -1,6 +1,6 @@
 ---
 title: "My RAG evaluation was lying to me, twice"
-published: false
+published: true
 description: "I built a small RAG CLI, then spent a week measuring it. Three of my four findings were negative, and the most useful one was that my own metric was wrong."
 tags: rag, typescript, ai, embeddings
 ---

@@ -183,4 +183,4 @@ eval itself embeds only the sampled questions and makes no Claude calls.
 - [x] **Week 3** — top-K retrieval, streamed answers from Claude, citations
 - [x] **Week 4** — retrieval evals, hybrid search, and [a write-up](writeup.md)
 
-Write-up: **[My RAG evaluation was lying to me, twice](TODO-dev-to-url)**
+Write-up: **[My RAG evaluation was lying to me, twice](https://dev.to/jerry_qian_72ad9b2386d3d0/my-rag-evaluation-was-lying-to-me-twice-45n9)**
