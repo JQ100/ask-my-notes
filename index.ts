@@ -16,14 +16,15 @@ import { z } from "zod";
 import { DEFAULT_CHUNK_OVERLAP, DEFAULT_CHUNK_SIZE } from "./src/chunk.ts";
 import { DEFAULT_DB_PATH } from "./src/db.ts";
 import { ingestPath } from "./src/ingest.ts";
+import { collectRepeated } from "./src/args.ts";
 import { answerQuestion } from "./src/query.ts";
 
-/** Repeatable flag, or one comma-separated value — citty hands back either shape. */
+/** Splits comma-separated entries and drops blanks. */
 const excludeSchema = z
-  .union([z.string(), z.array(z.string())])
-  .optional()
-  .transform((value) =>
-    (Array.isArray(value) ? value : value === undefined ? [] : [value])
+  .array(z.string())
+  .default([])
+  .transform((values) =>
+    values
       .flatMap((entry) => entry.split(","))
       .map((entry) => entry.trim())
       .filter((entry) => entry.length > 0),
@@ -108,13 +109,13 @@ const ingest = defineCommand({
       valueHint: "glob",
     },
   },
-  async run({ args }) {
+  async run({ args, rawArgs }) {
     const { source, db, size, overlap, exclude } = validate(ingestSchema, {
       source: args.source,
       db: args.db,
       size: args.size,
       overlap: args.overlap,
-      exclude: args.exclude,
+      exclude: collectRepeated(rawArgs, "exclude"),
     });
 
     await withFriendlyErrors(() => ingestPath(source, { dbPath: db, size, overlap, exclude }));

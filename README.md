@@ -70,7 +70,9 @@ sources:
 `.txt`), or a `.jsonl` file where each line is one document. Re-ingesting the
 same source replaces its previous chunks rather than duplicating them.
 
-`--exclude` skips files by glob, and is repeatable or comma-separated:
+`--exclude` skips files by glob, and is repeatable or comma-separated (repeats
+are read from raw argv, since citty itself keeps only the last occurrence of a
+flag — see [unjs/citty#258](https://github.com/unjs/citty/issues/258)):
 
 ```sh
 bun run index.ts ingest ~/notes --db data/mine.db   --exclude 'secrets.txt' --exclude '**/private/**'
