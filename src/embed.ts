@@ -53,7 +53,7 @@ async function post(url: string, key: string, body: unknown): Promise<number[][]
         ? retryAfter * 1000
         : Math.min(MAX_BACKOFF_MS, 2 ** attempt * 1000);
 
-      process.stdout.write(`\rrate limited, waiting ${Math.round(wait / 1000)}s (attempt ${attempt})`);
+      process.stderr.write(`\rrate limited, waiting ${Math.round(wait / 1000)}s (attempt ${attempt})`);
       await Bun.sleep(wait);
       continue;
     }
