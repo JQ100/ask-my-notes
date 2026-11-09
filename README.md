@@ -101,6 +101,50 @@ sends file contents to a third-party embedding API.
 | `EMBED_BASE_URL` | Points the embedder at a proxy or mock |
 | `CUSTOM_SQLITE_PATH` | An extension-capable `libsqlite3` |
 
+## Use it from Claude Code (MCP)
+
+`mcp.ts` serves the index as an [MCP](https://modelcontextprotocol.io) server
+with one tool, `search_notes`, so Claude Code can look things up in your notes
+in the middle of any conversation. Register it once, from the repo directory:
+
+```sh
+claude mcp add ask-my-notes -s user -- bun run --cwd "$PWD" mcp.ts
+claude mcp get ask-my-notes    # should report ✔ Connected
+```
+
+`-s user` makes it available in every project. `--cwd` matters: Claude Code
+starts servers from wherever it is running, and Bun reads `.env` and resolves
+`data/...` from the working directory. Keep the flag after `run` —
+`bun --cwd DIR run` prints help instead of starting the server.
+
+Then just ask, e.g. *"check my notes: what did I decide about X?"* Claude Code
+calls `search_notes`, gets the closest excerpts with their sources, and writes
+the answer itself. Against the sample corpus, `search_notes` with
+`{ "query": "What is the capital of Uruguay, and how many people live there?", "k": 3 }`
+returns:
+
+```
+[1] data/rag-mini-wikipedia.jsonl#0 — distance 0.846
+Uruguay (official full name in ; pron. , Eastern Republic of Uruguay) is a country
+located in the southeastern part of South America. It is home to 3.3 million people,
+of which 1.7 million live in the capital Montevideo and its metropolitan area.
+
+[2] data/rag-mini-wikipedia.jsonl#15 — distance 0.916
+Uruguay's capital, Montevideo, was founded by the Spanish in the early 18th century…
+
+[3] data/rag-mini-wikipedia.jsonl#36 — distance 0.922
+Montevideo, Uruguay's capital.
+```
+
+Unlike `query`, the server never calls Claude: the client is already a model,
+so the server only retrieves and needs just the embedding key. It is
+read-only, too — add notes with `ingest` as usual.
+
+| Variable | Purpose |
+| --- | --- |
+| `NOTES_DB` | Database to search (default `data/mine.db`) |
+| `NOTES_DESCRIPTION` | Replaces the tool description. Claude reads it to decide when to search, so naming what your notes cover makes it fire on the right questions. Keep it in `.env` if that list is personal. |
+
 ## Retrieval evaluation
 
 The corpus ships with 918 question/answer pairs, so retrieval can be measured
@@ -157,6 +201,7 @@ query:   argv → citty → zod → embed question → KNN → prompt → stream
 | `src/ingest.ts` | Orchestrates read → chunk → embed → store |
 | `src/query.ts` | Retrieval, prompt assembly, streamed answer with citations |
 | `src/eval.ts` | Scoring and sampling for the retrieval eval |
+| `mcp.ts` | MCP server exposing `search_notes` over stdio |
 
 - **[citty](https://github.com/unjs/citty)** turns `argv` into subcommands and
   generates `--help` from the command definitions.
