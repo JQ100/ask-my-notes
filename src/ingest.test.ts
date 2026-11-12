@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { displaySource, isExcluded } from "./ingest.ts";
+import { displaySource, embeddingText, fileTitle, isExcluded } from "./ingest.ts";
 
 describe("displaySource", () => {
   test("keeps project files project-relative", () => {
@@ -46,5 +46,25 @@ describe("isExcluded", () => {
     expect(isExcluded("caiwu/onlineAccts.txt", patterns)).toBe(true);
     expect(isExcluded("refi_2021/w2/w2_lime_2020.txt", patterns)).toBe(true);
     expect(isExcluded("faucet.txt", patterns)).toBe(false);
+  });
+});
+
+describe("fileTitle", () => {
+  test("keeps the parent directory and the filename", () => {
+    expect(fileTitle(join(homedir(), "sys/Documents/tmp/heloc_2019/notes.txt"))).toBe("heloc_2019/notes.txt");
+  });
+
+  test("is the same however the path is spelled", () => {
+    expect(fileTitle("notes/../notes/refi.txt")).toBe(fileTitle(join(process.cwd(), "notes/refi.txt")));
+  });
+});
+
+describe("embeddingText", () => {
+  test("puts the title above the chunk", () => {
+    expect(embeddingText("Hi Team Vanessa", "tmp/refi.txt")).toBe("File: tmp/refi.txt\n\nHi Team Vanessa");
+  });
+
+  test("leaves untitled text unchanged, so .jsonl rows embed as before", () => {
+    expect(embeddingText("Uruguay is a country")).toBe("Uruguay is a country");
   });
 });

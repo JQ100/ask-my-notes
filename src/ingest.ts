@@ -71,6 +71,25 @@ export interface Document {
   /** Stable identifier, shown later as a citation. */
   source: string;
   text: string;
+  /** Embedded ahead of each chunk, never stored; see `embeddingText`. */
+  title?: string;
+}
+
+/**
+ * A file's parent directory and name, e.g. "heloc_2019/notes.txt".
+ *
+ * Short notes often name their topic only in the path: refi.txt is a list of
+ * documents for a loan officer and never says "refinance". Two segments keep
+ * that context without the "~/sys/Documents/tmp" noise above it, and do not
+ * depend on which directory the ingest started from.
+ */
+export function fileTitle(path: string): string {
+  return resolve(path).split(sep).slice(-2).join("/");
+}
+
+/** What gets embedded: the chunk, under its file title when it has one. */
+export function embeddingText(text: string, title?: string): string {
+  return title ? `File: ${title}\n\n${text}` : text;
 }
 
 async function collectFiles(path: string, exclude: string[]): Promise<string[]> {
@@ -115,6 +134,7 @@ async function loadDocuments(path: string, exclude: string[]): Promise<Document[
     files.map(async (file) => ({
       source: displaySource(file),
       text: await Bun.file(file).text(),
+      title: fileTitle(file),
     })),
   );
 }
@@ -130,7 +150,11 @@ export async function ingestPath(source: string, options: IngestOptions = {}): P
 
   // Chunk everything up front so embedding calls batch across document boundaries.
   const pending = documents.flatMap((document) =>
-    chunkText(document.text, options).map((chunk) => ({ source: document.source, chunk })),
+    chunkText(document.text, options).map((chunk) => ({
+      source: document.source,
+      title: document.title,
+      chunk,
+    })),
   );
 
   if (pending.length === 0) {
@@ -151,7 +175,7 @@ export async function ingestPath(source: string, options: IngestOptions = {}): P
   try {
     for (let start = 0; start < pending.length; start += BATCH_SIZE) {
       const batch = pending.slice(start, start + BATCH_SIZE);
-      const vectors = await embedder.embed(batch.map((item) => item.chunk.text));
+      const vectors = await embedder.embed(batch.map((item) => embeddingText(item.chunk.text, item.title)));
 
       const dimensions = vectors[0]?.length;
       if (!dimensions) throw new Error("embedding provider returned no vectors");
